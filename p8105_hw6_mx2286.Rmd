@@ -1,30 +1,95 @@
 ---
 title: "p8105_hw6_mx2286"
-author: "Mingye"
-date: "2024-12-02"
-output: html_document
+author: "William Xie"
+date: "2024-12-01"
+output: github_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+library(tidyverse)
+library(rnoaa)
+library(broom)
+library(modelr)
 ```
 
-## R Markdown
+```{r}
+# Pull weather data
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+# Bootstrap function
+bootstrap_function <- function(data, n_bootstrap = 5000) {
+  # Initialize vectors to store results
+  r_squared_values <- numeric(n_bootstrap)
+  log_beta_product_values <- numeric(n_bootstrap)
+  
+  for (i in 1:n_bootstrap) {
+    # Sample with replacement
+    boot_sample <- data %>%
+      slice_sample(n = nrow(data), replace = TRUE)
+    
+    # Perform linear regression
+    model <- lm(tmax ~ tmin, data = boot_sample)
+    
+    # Extract R^2
+    r_squared_values[i] <- glance(model)$r.squared
+    
+    # Extract regression coefficients
+    beta_coefficients <- coef(model)
+    beta_0 <- beta_coefficients[1]
+    beta_1 <- beta_coefficients[2]
+    
+    # Compute log(β0 * β1), avoiding log(0) or negative issues
+    if (!is.na(beta_0 * beta_1) && beta_0 * beta_1 != 0) {
+      log_beta_product_values[i] <- log(abs(beta_0 * beta_1))
+    } else {
+      log_beta_product_values[i] <- NA
+    }
+  }
+  
+  return(list(r_squared = r_squared_values, log_beta_product = log_beta_product_values))
+}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+# Set seed for reproducibility
+set.seed(123)
 
-```{r cars}
-summary(cars)
+# Perform bootstrapping
+bootstrap_results <- bootstrap_function(weather_df)
+
+# Extract results
+r_squared_values <- bootstrap_results$r_squared
+log_beta_product_values <- bootstrap_results$log_beta_product
+
+# Compute confidence intervals
+r_squared_ci <- quantile(r_squared_values, probs = c(0.025, 0.975), na.rm = TRUE)
+log_beta_product_ci <- quantile(log_beta_product_values, probs = c(0.025, 0.975), na.rm = TRUE)
+
+# Print confidence intervals
+print(paste("R-squared 95% CI:", paste(round(r_squared_ci, 3), collapse = " - ")))
+print(paste("log(β0 * β1) 95% CI:", paste(round(log_beta_product_ci, 3), collapse = " - ")))
+
+# Plot distribution of R-squared values
+ggplot(data.frame(r_squared = r_squared_values), aes(x = r_squared)) +
+  geom_histogram(binwidth = 0.01, fill = "blue", color = "black", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Bootstrap Distribution of R-squared", x = "R-squared", y = "Frequency")
+
+# Plot distribution of log(β0 * β1) values
+ggplot(data.frame(log_beta_product = log_beta_product_values), aes(x = log_beta_product)) +
+  geom_histogram(binwidth = 0.05, fill = "red", color = "black", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Bootstrap Distribution of log(β0 * β1)", x = "log(β0 * β1)", y = "Frequency")
+```
+```{r}
+
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
