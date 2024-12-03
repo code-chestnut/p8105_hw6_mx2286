@@ -98,6 +98,8 @@ ggplot(data.frame(log_beta_product = log_beta_product_values), aes(x = log_beta_
 homicide_data <- read.csv("homicide-data.csv")
 head(homicide_data)
 ```
+
+
 #Question 2
 ```{r}
 # Create a dummy variable 'resolved' based on the 'disposition' column
@@ -158,6 +160,7 @@ odds_ratios <- odds_ratios %>%
 head(odds_ratios)
 ```
 The OR of 1.129 in Fresno, CA, suggests that cases involving male victims are more likely to be solved compared to those involving female victims. However, the confidence interval of 0.454–2.648 includes 1, indicating that this difference is not statistically significant. Similarly, in Minneapolis, MN, and Stockton, CA, the ORs point to a potential advantage for male victims, but the broad confidence intervals weaken the certainty of these results.
+
 
 #Question 3
 ```{r}
