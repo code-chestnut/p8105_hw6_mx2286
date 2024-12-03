@@ -90,6 +90,64 @@ ggplot(data.frame(log_beta_product = log_beta_product_values), aes(x = log_beta_
   labs(title = "Bootstrap Distribution of log(β0 * β1)", x = "log(β0 * β1)", y = "Frequency")
 ```
 ```{r}
+homicide_data <- read.csv("homicide-data.csv")
+head(homicide_data)
+```
+```{r}
+# Create a dummy variable 'resolved' based on the 'disposition' column
+homicide_data <- homicide_data %>%
+  mutate(resolved = ifelse(disposition %in% c("Closed without arrest", "Closed by arrest"), 1, 0))
+head(homicide_data)
 
 ```
+```{r}
+homicide_data <- read.csv("homicide-data.csv") %>%
+  mutate(
+    resolved = ifelse(disposition %in% c("Closed without arrest", "Closed by arrest"), 1, 0),
+    victim_age = as.numeric(victim_age),
+    city_state = paste(city, state, sep = ", ")
+  ) %>%
+  filter(victim_race %in% c("White", "Black"), 
+         !city %in% c("Dallas", "Tulsa"))
 
+baltimore_data <- homicide_data %>%
+  filter(city_state == "Baltimore, MD")
+
+model_baltimore <- glm(resolved ~ victim_age + victim_sex + victim_race, 
+                       data = baltimore_data, 
+                       family = binomial)
+
+summary_baltimore <- broom::tidy(model_baltimore, exponentiate = TRUE, conf.int = TRUE)
+print(summary_baltimore)
+
+nested_data <- homicide_data %>%
+  group_by(city_state) %>%
+  nest() %>%
+  mutate(data = map(data, ~filter(.x, !is.na(victim_age) & !is.na(victim_sex) & !is.na(victim_race))))
+
+city_models <- nested_data %>%
+  mutate(
+    model = map(data, ~glm(resolved ~ victim_age + victim_sex + victim_race, data = .x, family = binomial)),
+    results = map(model, ~broom::tidy(.x, exponentiate = TRUE, conf.int = TRUE))
+  ) %>%
+  unnest(results)
+
+odds_ratios <- city_models %>%
+  filter(term == "victim_sexMale") %>%
+  select(city_state, estimate, conf.low, conf.high)
+
+ggplot(odds_ratios, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(title = "The odds of solving crimes for male victims and female victims in each city",
+       x = "Cities",
+       y = "Odds ratio (OR) and confidence interval") +
+  theme_minimal(base_size = 8)
+
+odds_ratios <- odds_ratios %>%
+  arrange(desc(estimate))
+
+head(odds_ratios)
+```
+The OR of 1.13 in Fresno, CA, suggests that cases involving male victims are more likely to be solved compared to those involving female victims. However, the confidence interval of 0.45–2.65 includes 1, indicating that this difference is not statistically significant. Similarly, in Minneapolis, MN, and Stockton, CA, the ORs point to a potential advantage for male victims, but the broad confidence intervals weaken the certainty of these results.
