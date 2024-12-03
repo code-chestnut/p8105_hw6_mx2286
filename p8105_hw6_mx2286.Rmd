@@ -5,13 +5,18 @@ date: "2024-12-01"
 output: github_document
 ---
 
-```{r}
+```{r setup, include=FALSE}
 library(tidyverse)
 library(rnoaa)
 library(broom)
 library(modelr)
+library(purrr)
+library(knitr)
+
+knitr::opts_chunk$set(echo = TRUE)
 ```
 
+#Question 1
 ```{r}
 # Pull weather data
 weather_df = 
@@ -93,6 +98,7 @@ ggplot(data.frame(log_beta_product = log_beta_product_values), aes(x = log_beta_
 homicide_data <- read.csv("homicide-data.csv")
 head(homicide_data)
 ```
+#Question 2
 ```{r}
 # Create a dummy variable 'resolved' based on the 'disposition' column
 homicide_data <- homicide_data %>%
@@ -100,6 +106,7 @@ homicide_data <- homicide_data %>%
 head(homicide_data)
 
 ```
+
 ```{r}
 homicide_data <- read.csv("homicide-data.csv") %>%
   mutate(
@@ -150,4 +157,168 @@ odds_ratios <- odds_ratios %>%
 
 head(odds_ratios)
 ```
-The OR of 1.13 in Fresno, CA, suggests that cases involving male victims are more likely to be solved compared to those involving female victims. However, the confidence interval of 0.45–2.65 includes 1, indicating that this difference is not statistically significant. Similarly, in Minneapolis, MN, and Stockton, CA, the ORs point to a potential advantage for male victims, but the broad confidence intervals weaken the certainty of these results.
+The OR of 1.129 in Fresno, CA, suggests that cases involving male victims are more likely to be solved compared to those involving female victims. However, the confidence interval of 0.454–2.648 includes 1, indicating that this difference is not statistically significant. Similarly, in Minneapolis, MN, and Stockton, CA, the ORs point to a potential advantage for male victims, but the broad confidence intervals weaken the certainty of these results.
+
+#Question 3
+```{r}
+# Load and preprocess the dataset
+birthweight_clean <- read_csv("birthweight.csv") %>%
+  mutate(
+    mrace = case_when(
+      mrace == 1 ~ "White",
+      mrace == 2 ~ "Black",
+      mrace == 3 ~ "Asian",
+      mrace == 4 ~ "Puerto Rican",
+      mrace == 8 ~ "Other"
+    ),
+    frace = case_when(
+      frace == 1 ~ "White",
+      frace == 2 ~ "Black",
+      frace == 3 ~ "Asian",
+      frace == 4 ~ "Puerto Rican",
+      frace == 8 ~ "Other",
+      frace == 9 ~ "Unknown"
+    ),
+    babysex = case_when(
+      babysex == 1 ~ "Male",
+      babysex == 2 ~ "Female"
+    ),
+    blength = as.numeric(blength),
+    bhead = as.numeric(bhead),
+    gaweeks = as.numeric(gaweeks),
+    ppwt = as.numeric(ppwt),
+    wtgain = as.numeric(wtgain)
+  ) %>%
+  drop_na()
+
+# Check dataset summary
+summary(birthweight_clean)
+```
+##Proposed Regression Model
+
+The first model posits that birthweight is determined by *gestational age* , *maternal pre-pregnancy weight* , and *birth length* , as well as an interaction between gaweeks and blength.
+```{r}
+# Fit the proposed model
+proposed_model <- lm(bwt ~ babysex + gaweeks + ppwt + blength + blength:gaweeks, data = birthweight_clean)
+
+# Summarize the proposed model
+proposed_model_summary <- broom::tidy(proposed_model) %>%
+  mutate(
+    OR = exp(estimate),
+    CI_upper = exp(estimate + 1.96 * std.error),
+    CI_lower = exp(estimate - 1.96 * std.error)
+  ) %>%
+  select(term, estimate, OR, CI_lower, CI_upper, p.value)
+
+# Display the summary as a table
+proposed_model_summary %>%
+  kable(digits = 3, caption = "Proposed Model Summary")
+```
+```{r}
+# Add residuals and predictions
+proposed_results <- birthweight_clean %>%
+  mutate(
+    pred = predict(proposed_model, newdata = birthweight_clean),
+    resid = residuals(proposed_model)
+  )
+
+# Plot residuals vs fitted values
+ggplot(proposed_results, aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Residuals vs Fitted Values (Proposed Model)",
+    x = "Fitted Values",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+
+```
+The residual plot displayed acceptable dispersion with slight heteroscedasticity at higher fitted values, suggesting room for improvement while demonstrating adequate predictive performance across most of the data range.
+
+# Model 2: Birth Length and Gestational Age
+```{r}
+model_2 <- lm(bwt ~ blength + gaweeks, data = birthweight_clean)
+
+ggplot(birthweight_clean %>% 
+         mutate(resid = residuals(model_2), pred = predict(model_2)), aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    title = "Residuals vs Fitted Values (Model 2)",
+    x = "Fitted Values",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+```
+The residuals showed greater dispersion around the fitted values compared to the proposed model, suggesting less accurate predictions.
+
+# Model 3: Head Circumference, Length, and Baby’s Sex with Interactions
+```{r}
+model_3 <- lm(bwt ~ bhead * blength * babysex, data = birthweight_clean)
+
+ggplot(birthweight_clean %>% 
+         mutate(resid = residuals(model_3), pred = predict(model_3)), aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    title = "Residuals vs Fitted Values (Model 3)",
+    x = "Fitted Values",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+```
+The residuals formed a tighter cluster, indicating a better model fit compared to Model 2, although it did not definitively surpass the performance of the proposed model.
+
+# Cross-Validation
+```{r}
+cv_results <- crossv_mc(birthweight_clean, n = 100, test = 0.2) |> 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble),
+    proposed_model = map(train, ~ lm(bwt ~ babysex + gaweeks + ppwt + blength + blength:gaweeks, data = .x)),
+    model_2 = map(train, ~ lm(bwt ~ blength + gaweeks, data = .x)),
+    model_3 = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = .x)),
+    rmse_proposed = map2_dbl(proposed_model, test, ~ {
+      preds <- predict(.x, newdata = .y)
+      sqrt(mean((.y$bwt - preds)^2))
+    }),
+    rmse_model_2 = map2_dbl(model_2, test, ~ {
+      preds <- predict(.x, newdata = .y)
+      sqrt(mean((.y$bwt - preds)^2))
+    }),
+    rmse_model_3 = map2_dbl(model_3, test, ~ {
+      preds <- predict(.x, newdata = .y)
+      sqrt(mean((.y$bwt - preds)^2))
+    })
+  )
+
+# Prepare cv_summary for plotting
+cv_summary <- cv_results |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    cols = everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) |>
+  mutate(model = factor(model, levels = c("proposed", "model_2", "model_3")))
+
+# Plot RMSE comparison
+ggplot(cv_summary, aes(x = model, y = rmse, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) + 
+  geom_jitter(width = 0.2, alpha = 0.5, color = "black") + 
+  scale_fill_manual(values = c("lightgreen", "salmon", "skyblue")) + 
+  labs(
+    title = "Cross-Validation RMSE Comparison",
+    x = "Model",
+    y = "RMSE",
+    fill = "Model"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+The RMSE comparison revealed that Model 3 had the lowest median RMSE (~310) and the least variation, indicating its superior predictive performance, likely due to the inclusion of interaction terms. The proposed model demonstrated a median RMSE of ~330, consistently outperforming Model 2 (median RMSE ~350), but it fell slightly short of Model 3 in accuracy. These findings, visualized in a boxplot, highlight the proposed model's reliability while underscoring the enhanced predictive power of interaction effects in Model 3.
